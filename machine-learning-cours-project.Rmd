@@ -1,0 +1,176 @@
+---
+title: "Barbell lifts quality predictions"
+author: "Damien Sonnerat"
+date: "21 novembre 2015"
+output: html_document
+---
+
+##Project pupose
+
+The purpose of this work is to provide a model capable of predicting how well barbell lifting is done. The data used to do so is fournish by  <http://groupware.les.inf.puc-rio.br/har>.
+
+##Preparing DATA
+
+###Loading the DATA
+
+The following code was used to load the data into two data frame called trainData and testData:
+```{r, resutls='hide'}
+library('caret')
+library('randomForest')
+set.seed(1) #in order to have the same results after each run.
+
+if(!exists('trainData')){
+        trainFileName = 'train.csc'
+        if(!file.exists(trainFileName)){
+                download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                                method =  'curl', destfile = trainFileName)
+        }
+        trainData <- read.csv(trainFileName, stringsAsFactors=FALSE)
+}
+
+if(!exists('testData')){
+        testFileName = 'test.csv'
+        if(!file.exists(testFileName)){
+                download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                      method =  'curl', destfile = testFileName)
+        }
+        testData <- read.csv(testFileName, stringsAsFactors=FALSE)
+}
+```
+
+###Selecting predictors
+
+Taking a look at the first rows using the command head(train, n=30), it is obvious that some columns seems to have a lost of missing values (they are either NA or blank character).
+
+The follwing code allows to quantify it:
+
+```{r, resutls='hide'}
+naPercentagePerColumn <-  sapply(as.data.frame(is.na(trainData) | trainData == ''), sum) / nrow(trainData) * 100
+```
+
+The variable naPercentagePerColumn thus calculated gives the percetage of missing values for each column.
+
+The following code shows that the percentage is either 0 or 97.93089
+
+```{r}
+unique(naPercentagePerColumn)
+```
+
+Because 98% of missing values is very high, the corresponding variables won't be used in the prediction. Because the percentage is either 0 or 98% the remaining varialbes won't have any  missing values.
+
+The following code create a index that allows selection of columns that don't have any missing values.
+
+```{r, resutls='hide'}
+columnIndex <- naPercentagePerColumn==0
+```
+
+Also the following variables will be removed because it doesn't make sense to include them (they have nothing to do with what we want to predict):
+X (row number), user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window and num_window.
+Those variables are the fisrt 7 columns. Though the following code will unselect those columns:
+
+```{r, resutls='hide'}
+columnIndex[1:7]  <- FALSE
+```
+
+Now we can use columnIndex to filter columns on train and test variable.
+Note that, comparing column names, the two set differs only by the last column. In the train set, the last column is 'classe'. And in the test set, the last column is 'problem_id'. Both columns will be kept.
+
+```{r, resutls='hide'}
+trainData <- trainData[,columnIndex]
+testData <- testData[,columnIndex]
+```
+
+Finally the outcome 'classe' has five values A,B,C,D,E as shown by the following code:
+
+```{r}
+unique(trainData$classe)
+```
+
+It has to be considered as a factor:
+
+```{r, resutls='hide'}
+trainData$classe <- as.factor(trainData$classe)
+```
+
+### DATA for validation
+
+In order to estimate the prediction error,  the training set is going to be split into a training set (60% of the observations) and a validating set (40% of the observations):
+
+```{r, resutls='hide'}
+trainIndex = createDataPartition(trainData$classe, p = 0.6,list=FALSE)
+training = trainData[trainIndex,]
+validating = trainData[-trainIndex,]
+```
+
+## Building the model
+
+Random forest is known to be one of the top performing algorithms. A drawback of this method is the difficulty to interpret results. But in this project we are intersted in accuracy not in interpretablity. So I decided to use random forest to predict the outcome.
+
+The following code was used to build the model:
+
+```{r}
+modelFit <- train(classe ~ . , method = 'rf', data = training)
+```
+
+## Error calculation
+
+Now that the model is buit, let's figure out how good it is.
+
+### Perdictive error on the training set
+
+The table bellow gives count of predicted classe versus real classe.
+
+```{r}
+table(predict(modelFit), training$classe)
+```
+
+It appends the 100% of the prediction are right which means that overfitting probably occured.
+Calculating error on the training set leads to error that is too optimistic.
+Let's calculate it on the validating set.
+
+### Predictive error on the validating set
+
+The table bellow gives counts of predicted classe versus real classe.
+
+```{r}
+tab <- table(predict(modelFit, newdata = validating), validating$classe)
+tab
+```
+
+Let's calculate percentage of correct prediction.
+
+```{r}
+nbPrediction <- nrow(validating)
+diag(tab) <- 0 # set diagonal to zero. Diagonal hold correct predictions.
+nbErrors <- sum(tab) # sum all the incorrect predictions.
+accuracy <- (nbPrediction - nbErrors) / nbPrediction * 100
+accuracy
+```
+
+Though the accuracy is very good.
+
+## Caclutating prediction for the 20 test cases and preparing files for submission
+
+Calculating predictions.
+
+```{r}
+prediction <- as.vector(predict(modelFit, newdata=testData))
+```
+
+Preparing files for submission
+
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+setwd('results') # Folder 'results' must exists. Create it if not.
+
+pml_write_files(prediction)
+```
+
+The sumbission of the 20 files lead to 100 % correct prediction.
